@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "embed:openai": "node embed.js generate openai",
+    "embed:ollama": "node embed.js generate ollama",
+    "get:openai": "node embed.js get openai",
+    "get:ollama": "node embed.js get ollama"
   },
   "keywords": [],
   "author": "",
