@@ -1,0 +1,554 @@
+# JSONB in PostgreSQL — Simple Summary
+
+**JSONB** is a special PostgreSQL data type that lets you store **JSON objects** inside a table column.
+
+It combines the flexibility of document databases (like MongoDB) with the power of SQL. This is useful when your data doesn't have a fixed structure or may change over time.
+
+Instead of creating many tables or adding lots of optional columns, you can store complex JSON data in a single `JSONB` column.
+
+## Key Points
+
+* `JSONB` stores JSON data inside PostgreSQL.
+* Ideal for data with flexible or changing structures.
+* Supports nested JSON objects and arrays.
+* PostgreSQL validates that inserted JSON is valid.
+* JSONB data can be queried using SQL.
+* Great for features like:
+
+  * Rich content
+  * User settings
+  * Metadata
+  * Dynamic forms
+  * Product attributes
+
+---
+
+# Why Use JSONB?
+
+Imagine a message board where users can embed different types of content.
+
+Today you support:
+
+* Polls
+* Images
+* Videos
+
+Later you might support:
+
+* Tweets
+* Documents
+* Maps
+* Other future content
+
+If you used a normal relational schema, you'd need many tables or many optional columns.
+
+Instead, you can store each piece of content as JSON.
+
+Example:
+
+```json id="r6xgj8"
+{
+  "type": "image",
+  "url": "https://example.com/image.png",
+  "dimensions": {
+    "width": 1920,
+    "height": 1080
+  }
+}
+```
+
+Different rows can store completely different JSON objects while using the same table.
+
+---
+
+# Creating a Table with JSONB
+
+```sql id="uhbdkv"
+DROP TABLE IF EXISTS rich_content;
+
+CREATE TABLE rich_content (
+  content_id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  comment_id INT REFERENCES comments(comment_id) ON DELETE CASCADE,
+  content JSONB NOT NULL
+);
+```
+
+### Explanation
+
+* `content_id` → Primary key.
+* `GENERATED ALWAYS AS IDENTITY` → Automatically generates unique IDs.
+* `comment_id` → References a comment.
+* `REFERENCES comments(comment_id)` → Creates a foreign key relationship.
+* `ON DELETE CASCADE` → Deletes related rich content if the comment is deleted.
+* `content JSONB` → Stores the JSON object.
+* `NOT NULL` → JSON data is required.
+
+---
+
+# Inserting JSON Data
+
+```sql id="dbw4vi"
+INSERT INTO rich_content
+  (comment_id, content)
+VALUES
+(
+  63,
+  '{
+    "type": "poll",
+    "question": "What is your favorite color?",
+    "options": ["blue", "red", "green", "yellow"]
+  }'
+);
+```
+
+The JSON is stored exactly as a JSON object.
+
+PostgreSQL checks that the JSON is valid before saving it.
+
+---
+
+# Querying JSON
+
+## Bracket Notation (PostgreSQL 14+)
+
+Access JSON fields just like JavaScript.
+
+```sql id="6zq1eq"
+SELECT content['type']
+FROM rich_content;
+```
+
+Result:
+
+```text id="l8h3oz"
+"poll"
+"video"
+"poll"
+"image"
+"image"
+```
+
+Notice the quotation marks.
+
+The result is still JSON, **not plain text**.
+
+---
+
+# Getting Text Values with `->>`
+
+To retrieve plain text instead of JSON:
+
+```sql id="6knn4h"
+SELECT content ->> 'type'
+FROM rich_content;
+```
+
+Result:
+
+```text id="5o4kdz"
+poll
+video
+poll
+image
+image
+```
+
+`->>` converts the JSON value into a text string.
+
+---
+
+# Removing Duplicate Values
+
+Use `DISTINCT`.
+
+Incorrect:
+
+```sql id="sks8r0"
+SELECT DISTINCT content['type']
+FROM rich_content;
+```
+
+This fails because PostgreSQL cannot compare JSON values directly.
+
+Correct:
+
+```sql id="75ik0j"
+SELECT DISTINCT content ->> 'type'
+FROM rich_content;
+```
+
+Result:
+
+```text id="vnjznl"
+poll
+video
+image
+```
+
+---
+
+# Filtering JSON Data
+
+Find only polls.
+
+```sql id="cw5b0s"
+SELECT
+  content ->> 'type' AS content_type,
+  comment_id
+FROM rich_content
+WHERE content ->> 'type' = 'poll';
+```
+
+Result:
+
+```text id="9w9j2r"
+content_type | comment_id
+-------------+-----------
+poll         | 63
+poll         | 104
+```
+
+### Why Can't We Use `content_type` in `WHERE`?
+
+Because SQL executes clauses in this order:
+
+1. `FROM`
+2. `WHERE`
+3. `GROUP BY`
+4. `HAVING`
+5. `SELECT`
+6. `ORDER BY`
+
+Since `WHERE` runs **before** `SELECT`, the alias `content_type` doesn't exist yet.
+
+---
+
+# Reading Nested JSON
+
+Suppose the JSON looks like:
+
+```json id="ffyqcr"
+{
+  "dimensions": {
+    "height": 1080,
+    "width": 1920
+  }
+}
+```
+
+Retrieve nested values:
+
+```sql id="yrvh6n"
+SELECT
+  content['dimensions'] ->> 'height' AS height,
+  content['dimensions'] ->> 'width' AS width,
+  comment_id
+FROM rich_content;
+```
+
+---
+
+# Ignoring Missing Values
+
+Some rows don't have `dimensions`.
+
+Filter them out:
+
+```sql id="ajmlb3"
+SELECT
+  content['dimensions'] ->> 'height' AS height,
+  content['dimensions'] ->> 'width' AS width,
+  comment_id
+FROM rich_content
+WHERE content['dimensions'] IS NOT NULL;
+```
+
+Only rows with dimensions are returned.
+
+---
+
+# JSON Operators
+
+PostgreSQL provides several ways to work with JSON.
+
+## `->>`
+
+Returns the value as **plain text**.
+
+Most commonly used in production.
+
+```sql id="xfd4f0"
+SELECT content ->> 'type'
+FROM rich_content;
+```
+
+Use when:
+
+* Comparing values
+* Filtering
+* Sorting
+* Using `DISTINCT`
+
+---
+
+## `->`
+
+Returns the value as **JSON**.
+
+Useful when continuing to navigate deeper.
+
+```sql id="lc2fkw"
+SELECT content -> 'dimensions' -> 'height'
+FROM rich_content;
+```
+
+Result is still JSON.
+
+---
+
+## Bracket Notation
+
+Modern PostgreSQL syntax.
+
+Feels like JavaScript.
+
+```sql id="a8v0n9"
+SELECT content['dimensions']['height']
+FROM rich_content;
+```
+
+Returns JSON.
+
+---
+
+## `CAST`
+
+Explicitly converts JSON into another data type.
+
+Example:
+
+```sql id="ot2m4v"
+SELECT CAST(content['type'] AS TEXT)
+FROM rich_content;
+```
+
+This is more verbose but makes the conversion very clear.
+
+---
+
+## `#>>`
+
+Extracts a JSON value as text.
+
+Example:
+
+```sql id="yslk2t"
+SELECT content['type'] #>> '{}'
+FROM rich_content;
+```
+
+Less common than `->>`.
+
+---
+
+# Old vs Modern Syntax
+
+Older style:
+
+```sql id="kgh3m4"
+SELECT content -> 'dimensions' ->> 'height'
+FROM rich_content;
+```
+
+Modern style:
+
+```sql id="r0q8wf"
+SELECT content['dimensions'] ->> 'height'
+FROM rich_content;
+```
+
+Both are correct.
+
+Most teams today prefer:
+
+* Bracket notation for navigation
+* `->>` for extracting text
+
+---
+
+# When Should You Use JSONB?
+
+Use JSONB when:
+
+* Data structure changes frequently.
+* Different records have different fields.
+* You need nested objects or arrays.
+* Future requirements are unknown.
+
+Avoid JSONB when:
+
+* Every row has the same structure.
+* The data fits naturally into relational tables.
+* You frequently join the data with other tables.
+
+---
+
+# JSONB vs Regular Columns
+
+| Regular Columns             | JSONB                                     |
+| --------------------------- | ----------------------------------------- |
+| Fixed schema                | Flexible schema                           |
+| Fast for structured data    | Excellent for dynamic data                |
+| Easy to enforce constraints | Better for unknown or changing structures |
+| One value per column        | Entire JSON object in one column          |
+
+---
+
+# One-Sentence Summary
+
+**JSONB allows PostgreSQL to store and query flexible JSON documents inside relational tables, combining the power of SQL with the flexibility of document databases like MongoDB.**
+
+---
+
+# Commands Used
+
+## `DROP TABLE IF EXISTS`
+
+Deletes a table if it exists.
+
+```sql id="1kk4pa"
+DROP TABLE IF EXISTS rich_content;
+```
+
+### Explanation
+
+* `DROP TABLE` → Removes a table from the database.
+* `IF EXISTS` → Prevents an error if the table doesn't exist.
+
+---
+
+## `CREATE TABLE`
+
+Creates a new table.
+
+```sql id="7tvfsa"
+CREATE TABLE rich_content (
+  content_id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  comment_id INT REFERENCES comments(comment_id) ON DELETE CASCADE,
+  content JSONB NOT NULL
+);
+```
+
+### Explanation
+
+* `PRIMARY KEY` → Uniquely identifies each row.
+* `GENERATED ALWAYS AS IDENTITY` → Auto-generates unique IDs.
+* `REFERENCES` → Creates a foreign key relationship.
+* `ON DELETE CASCADE` → Automatically deletes related rows when the referenced row is deleted.
+* `JSONB` → Stores JSON data in a binary format optimized for querying.
+* `NOT NULL` → Requires a value.
+
+---
+
+## `INSERT INTO`
+
+Adds new rows.
+
+```sql id="4a4o4y"
+INSERT INTO rich_content (comment_id, content)
+VALUES (...);
+```
+
+### Explanation
+
+* `INSERT INTO` → Adds new records.
+* `VALUES` → Specifies the values to insert.
+
+---
+
+## `SELECT`
+
+Retrieves data.
+
+```sql id="8j2r9x"
+SELECT content['type']
+FROM rich_content;
+```
+
+### Explanation
+
+* `SELECT` → Retrieves data.
+* `FROM` → Specifies the source table.
+
+---
+
+## `DISTINCT`
+
+Removes duplicate values.
+
+```sql id="9m4trd"
+SELECT DISTINCT content ->> 'type'
+FROM rich_content;
+```
+
+### Explanation
+
+* `DISTINCT` → Returns only unique values.
+
+---
+
+## `WHERE`
+
+Filters rows.
+
+```sql id="6phhny"
+WHERE content ->> 'type' = 'poll';
+```
+
+### Explanation
+
+* `WHERE` → Returns only rows matching the condition.
+
+---
+
+## `AS`
+
+Creates a temporary column alias.
+
+```sql id="4fjcjq"
+content ->> 'type' AS content_type
+```
+
+### Explanation
+
+* `AS` → Gives a temporary name to a column in the query result.
+
+---
+
+## `IS NOT NULL`
+
+Checks that a value exists.
+
+```sql id="g4lh4m"
+WHERE content['dimensions'] IS NOT NULL;
+```
+
+### Explanation
+
+* `IS NOT NULL` → Returns only rows where the value is not `NULL`.
+
+---
+
+# PostgreSQL JSON Operators
+
+| Operator            | Purpose                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `->`                | Returns a JSON value                                         |
+| `->>`               | Returns a text value                                         |
+| `[]`                | Accesses JSON fields using bracket notation (PostgreSQL 14+) |
+| `CAST(... AS TEXT)` | Explicitly converts JSON to text                             |
+| `#>>`               | Extracts a JSON value as text                                |
+
+## Command Flags
+
+No command-line flags (such as `-a`, `--help`, or `-v`) are used in these notes. The SQL statements and JSON operators also do not use command-line flags.
